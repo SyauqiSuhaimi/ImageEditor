@@ -10,10 +10,9 @@ Features 🌟
 ✅ Download the edited image 💾
 
 Why This Project? 🤖
+
 I wanted to explore the potential of AI-assisted development, using AI prompts for every step—from idea to deployment. This project showcases how AI can be leveraged for rapid prototyping and development.
 
-Tech Stack 🏗️
-HTML
-CSS
-JavaScript
+Tech Stack 🏗️ : HTML, CSS, JavaScript
+
 📌 This README was also generated using AI.
