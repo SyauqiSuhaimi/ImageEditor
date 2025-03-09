@@ -1,6 +1,7 @@
 This is my first application developed entirely using AI prompts! 🚀 I utilized 100% AI-generated code and guidance to build a simple yet functional image editor.
 
 Features 🌟
+
 ✅ Upload an image 📤
 ✅ Draw on the image (choose colors) ✏️🎨
 ✅ Eraser tool 🧽
