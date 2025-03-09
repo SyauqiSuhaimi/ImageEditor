@@ -1,15 +1,12 @@
 document.addEventListener("DOMContentLoaded", () => {
   // Elements
-  const editorContainer = document.getElementById("editor-container");
-  const editor = document.getElementById("editor");
-  const imageLayer = document.getElementById("image-layer");
-  const drawLayer = document.getElementById("draw-layer");
-  const textLayer = document.getElementById("text-layer");
+  const canvas = document.getElementById("canvas");
+  const ctx = canvas.getContext("2d");
+  const canvasContainer = document.getElementById("canvas-container");
   const placeholder = document.getElementById("placeholder");
   const fileInput = document.getElementById("file-input");
   const drawBtn = document.getElementById("draw-btn");
   const eraseBtn = document.getElementById("erase-btn");
-  const textBtn = document.getElementById("text-btn");
   const colorPicker = document.getElementById("color-picker");
   const brushSize = document.getElementById("brush-size");
   const brushSizeValue = document.getElementById("brush-size-value");
@@ -19,10 +16,17 @@ document.addEventListener("DOMContentLoaded", () => {
   const zoomValue = document.getElementById("zoom-value");
   const downloadBtn = document.getElementById("download-btn");
   const panBtn = document.getElementById("pan-btn");
+  const textBtn = document.getElementById("text-btn");
+  const textOverlayContainer = document.getElementById(
+    "text-overlay-container"
+  );
 
   // Variables
-  let currentTool = "draw";
   let isDrawing = false;
+  let lastX = 0;
+  let lastY = 0;
+  let currentTool = "draw";
+  let originalImage = null;
   let scale = 1;
   let offsetX = 0;
   let offsetY = 0;
@@ -31,11 +35,17 @@ document.addEventListener("DOMContentLoaded", () => {
   let dragStartY = 0;
   let hasImage = false;
 
+  // Initialize
+  resizeCanvas();
+  window.addEventListener("resize", resizeCanvas);
+
+  // Set initial state
+  drawBtn.classList.add("active");
+
   // Event listeners
   fileInput.addEventListener("change", handleImageUpload);
   drawBtn.addEventListener("click", () => setTool("draw"));
   eraseBtn.addEventListener("click", () => setTool("erase"));
-  textBtn.addEventListener("click", addTextOverlay);
   colorPicker.addEventListener("input", updateBrushColor);
   brushSize.addEventListener("input", updateBrushSize);
   zoomInBtn.addEventListener("click", zoomIn);
@@ -43,19 +53,27 @@ document.addEventListener("DOMContentLoaded", () => {
   zoomSlider.addEventListener("input", handleZoomSlider);
   downloadBtn.addEventListener("click", downloadImage);
   panBtn.addEventListener("click", () => setTool("pan"));
+  textBtn.addEventListener("click", addTextOverlay);
 
-  // Editor event listeners
-  editor.addEventListener("mousedown", startDrawing);
-  editor.addEventListener("mousemove", draw);
-  editor.addEventListener("mouseup", stopDrawing);
-  editor.addEventListener("mouseleave", stopDrawing);
-  editorContainer.addEventListener("wheel", handleWheel);
+  // Canvas event listeners
+  canvas.addEventListener("mousedown", startDrawing);
+  canvas.addEventListener("mousemove", draw);
+  canvas.addEventListener("mouseup", stopDrawing);
+  canvas.addEventListener("mouseout", stopDrawing);
+  canvas.addEventListener("wheel", handleWheel);
 
   // Drag functionality
-  editorContainer.addEventListener("mousedown", startDrag);
-  editorContainer.addEventListener("mousemove", drag);
-  editorContainer.addEventListener("mouseup", stopDrag);
-  editorContainer.addEventListener("mouseleave", stopDrag);
+  canvasContainer.addEventListener("mousedown", startDrag);
+  canvasContainer.addEventListener("mousemove", drag);
+  canvasContainer.addEventListener("mouseup", stopDrag);
+  canvasContainer.addEventListener("mouseleave", stopDrag);
+
+  // Functions
+  function resizeCanvas() {
+    canvas.width = canvasContainer.clientWidth;
+    canvas.height = canvasContainer.clientHeight;
+    redrawCanvas();
+  }
 
   function handleImageUpload(e) {
     const file = e.target.files[0];
@@ -63,25 +81,41 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const reader = new FileReader();
     reader.onload = (event) => {
-      imageLayer.style.backgroundImage = `url(${event.target.result})`;
-      hasImage = true;
-      placeholder.style.display = "none";
-      resetView();
+      const img = new Image();
+      img.onload = () => {
+        originalImage = img;
+        hasImage = true;
+        placeholder.style.display = "none";
+        canvas.style.display = "block";
+        resetView();
+        redrawCanvas();
+      };
+      img.src = event.target.result;
     };
     reader.readAsDataURL(file);
   }
 
   function resetView() {
     scale = 1;
-    offsetX = 0;
-    offsetY = 0;
-    updateEditorTransform();
+    offsetX = (canvas.width - originalImage.width) / 2;
+    offsetY = (canvas.height - originalImage.height) / 2;
     zoomSlider.value = 100;
     zoomValue.textContent = "100%";
   }
 
-  function updateEditorTransform() {
-    editor.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
+  function redrawCanvas() {
+    if (hasImage) {
+      adjustOffsets(); // Only call adjustOffsets when there's an image
+    }
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (hasImage) {
+      ctx.save();
+      ctx.translate(offsetX, offsetY);
+      ctx.scale(scale, scale);
+      ctx.drawImage(originalImage, 0, 0);
+      ctx.restore();
+    }
   }
 
   function setTool(tool) {
@@ -90,10 +124,15 @@ document.addEventListener("DOMContentLoaded", () => {
     eraseBtn.classList.toggle("active", tool === "erase");
     panBtn.classList.toggle("active", tool === "pan");
 
-    if (tool === "draw" || tool === "erase") {
-      editor.style.cursor = "crosshair";
+    if (tool === "draw") {
+      canvas.style.cursor = "crosshair";
+      canvasContainer.style.cursor = "default";
+    } else if (tool === "erase") {
+      canvas.style.cursor = "cell";
+      canvasContainer.style.cursor = "default";
     } else if (tool === "pan") {
-      editor.style.cursor = "grab";
+      canvas.style.cursor = "grab";
+      canvasContainer.style.cursor = "grab";
     }
   }
 
@@ -109,29 +148,43 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!hasImage || currentTool === "pan") return;
 
     isDrawing = true;
-    draw(e);
+    const rect = canvas.getBoundingClientRect();
+    lastX = (e.clientX - rect.left - offsetX) / scale;
+    lastY = (e.clientY - rect.top - offsetY) / scale;
   }
 
   function draw(e) {
-    if (!isDrawing || !hasImage || currentTool === "pan") return;
+    if (!isDrawing || !hasImage) return;
 
-    const rect = editor.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / scale;
-    const y = (e.clientY - rect.top) / scale;
+    const rect = canvas.getBoundingClientRect();
+    const currentX = (e.clientX - rect.left - offsetX) / scale;
+    const currentY = (e.clientY - rect.top - offsetY) / scale;
 
-    const circle = document.createElementNS(
-      "http://www.w3.org/2000/svg",
-      "circle"
-    );
-    circle.setAttribute("cx", x);
-    circle.setAttribute("cy", y);
-    circle.setAttribute("r", brushSize.value / (2 * scale));
-    circle.setAttribute(
-      "fill",
-      currentTool === "draw" ? colorPicker.value : "#ffffff"
-    );
+    ctx.save();
+    ctx.translate(offsetX, offsetY);
+    ctx.scale(scale, scale);
 
-    drawLayer.appendChild(circle);
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.lineWidth = brushSize.value / scale;
+
+    if (currentTool === "draw") {
+      ctx.strokeStyle = colorPicker.value;
+      ctx.globalCompositeOperation = "source-over";
+    } else if (currentTool === "erase") {
+      ctx.strokeStyle = "#ffffff";
+      ctx.globalCompositeOperation = "destination-out";
+    }
+
+    ctx.beginPath();
+    ctx.moveTo(lastX, lastY);
+    ctx.lineTo(currentX, currentY);
+    ctx.stroke();
+
+    ctx.restore();
+
+    lastX = currentX;
+    lastY = currentY;
   }
 
   function stopDrawing() {
@@ -142,21 +195,21 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!hasImage) return;
     scale = Math.min(scale * 1.2, 4);
     updateZoomUI();
-    updateEditorTransform();
+    redrawCanvas();
   }
 
   function zoomOut() {
     if (!hasImage) return;
     scale = Math.max(scale / 1.2, 0.1);
     updateZoomUI();
-    updateEditorTransform();
+    redrawCanvas();
   }
 
   function handleZoomSlider() {
     if (!hasImage) return;
     scale = Number.parseInt(zoomSlider.value) / 100;
     updateZoomUI(false);
-    updateEditorTransform();
+    redrawCanvas();
   }
 
   function updateZoomUI(updateSlider = true) {
@@ -169,56 +222,133 @@ document.addEventListener("DOMContentLoaded", () => {
   function handleWheel(e) {
     if (!hasImage) return;
 
-    e.preventDefault();
+    e.preventDefault(); // Prevent default scrolling
 
     if (e.ctrlKey) {
       // Zooming
       const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
-      const mouseX = e.clientX - editorContainer.offsetLeft;
-      const mouseY = e.clientY - editorContainer.offsetTop;
+      const mouseX = e.clientX - canvas.offsetLeft;
+      const mouseY = e.clientY - canvas.offsetTop;
 
       const oldScale = scale;
       scale = Math.min(Math.max(scale * zoomFactor, 0.1), 4);
 
       // Adjust offset to zoom towards mouse position
-      offsetX += mouseX * (1 - scale / oldScale);
-      offsetY += mouseY * (1 - scale / oldScale);
+      offsetX = mouseX - (mouseX - offsetX) * (scale / oldScale);
+      offsetY = mouseY - (mouseY - offsetY) * (scale / oldScale);
 
       updateZoomUI();
-      updateEditorTransform();
     } else if (e.shiftKey) {
       // Horizontal scrolling
       offsetX -= e.deltaY;
-      updateEditorTransform();
     } else {
       // Vertical scrolling
       offsetY -= e.deltaY;
-      updateEditorTransform();
     }
+
+    redrawCanvas();
   }
 
   function startDrag(e) {
     if (!hasImage || (isDrawing && currentTool !== "pan")) return;
 
-    isDragging = true;
-    dragStartX = e.clientX - offsetX;
-    dragStartY = e.clientY - offsetY;
-    editor.style.cursor = "grabbing";
+    // Only allow dragging when in pan mode or when dragging outside the canvas
+    if (currentTool === "pan" || e.target !== canvas) {
+      isDragging = true;
+      dragStartX = e.clientX - offsetX;
+      dragStartY = e.clientY - offsetY;
+
+      if (currentTool === "pan") {
+        canvas.style.cursor = "grabbing";
+      }
+      canvasContainer.style.cursor = "grabbing";
+    }
   }
 
   function drag(e) {
     if (!isDragging || !hasImage) return;
 
-    offsetX = e.clientX - dragStartX;
-    offsetY = e.clientY - dragStartY;
-    updateEditorTransform();
+    const newOffsetX = e.clientX - dragStartX;
+    const newOffsetY = e.clientY - dragStartY;
+
+    const canvasRect = canvas.getBoundingClientRect();
+    const scaledWidth = originalImage.width * scale;
+    const scaledHeight = originalImage.height * scale;
+
+    // Allow dragging only when image is larger than canvas
+    if (scaledWidth > canvasRect.width) {
+      offsetX = Math.min(
+        0,
+        Math.max(canvasRect.width - scaledWidth, newOffsetX)
+      );
+    }
+    if (scaledHeight > canvasRect.height) {
+      offsetY = Math.min(
+        0,
+        Math.max(canvasRect.height - scaledHeight, newOffsetY)
+      );
+    }
+
+    redrawCanvas();
   }
 
   function stopDrag() {
     if (isDragging) {
       isDragging = false;
-      editor.style.cursor = currentTool === "pan" ? "grab" : "default";
+
+      if (currentTool === "pan") {
+        canvas.style.cursor = "grab";
+      }
+      canvasContainer.style.cursor = currentTool === "pan" ? "grab" : "default";
     }
+  }
+
+  function downloadImage() {
+    if (!hasImage) return;
+
+    // Create a temporary canvas to render the final image
+    const tempCanvas = document.createElement("canvas");
+    tempCanvas.width = originalImage.width;
+    tempCanvas.height = originalImage.height;
+    const tempCtx = tempCanvas.getContext("2d");
+
+    // Draw the original image
+    tempCtx.drawImage(originalImage, 0, 0);
+
+    // Draw the edits from our main canvas
+    tempCtx.drawImage(
+      canvas,
+      offsetX,
+      offsetY,
+      originalImage.width * scale,
+      originalImage.height * scale,
+      0,
+      0,
+      originalImage.width,
+      originalImage.height
+    );
+
+    // Draw text overlays
+    const textOverlays = document.querySelectorAll(".text-overlay");
+    textOverlays.forEach((overlay) => {
+      const rect = overlay.getBoundingClientRect();
+      const canvasRect = canvas.getBoundingClientRect();
+
+      tempCtx.font = window.getComputedStyle(overlay).font;
+      tempCtx.fillStyle = window.getComputedStyle(overlay).color;
+      tempCtx.fillText(
+        overlay.textContent,
+        (rect.left - canvasRect.left - offsetX) / scale,
+        (rect.top - canvasRect.top - offsetY) / scale +
+          Number.parseInt(window.getComputedStyle(overlay).fontSize)
+      );
+    });
+
+    // Create download link
+    const link = document.createElement("a");
+    link.download = "edited-image.png";
+    link.href = tempCanvas.toDataURL("image/png");
+    link.click();
   }
 
   function addTextOverlay() {
@@ -234,29 +364,29 @@ document.addEventListener("DOMContentLoaded", () => {
     textElement.style.color = colorPicker.value;
     textElement.style.fontSize = brushSize.value + "px";
 
-    textLayer.appendChild(textElement);
+    textOverlayContainer.appendChild(textElement);
 
-    let isTextDragging = false;
-    let textStartX, textStartY;
+    let isDragging = false;
+    let startX, startY;
 
     textElement.addEventListener("mousedown", (e) => {
       if (currentTool !== "pan") {
-        isTextDragging = true;
-        textStartX = e.clientX - textElement.offsetLeft;
-        textStartY = e.clientY - textElement.offsetTop;
-        e.stopPropagation();
+        isDragging = true;
+        startX = e.clientX - textElement.offsetLeft;
+        startY = e.clientY - textElement.offsetTop;
+        e.preventDefault();
       }
     });
 
     document.addEventListener("mousemove", (e) => {
-      if (isTextDragging) {
-        textElement.style.left = e.clientX - textStartX + "px";
-        textElement.style.top = e.clientY - textStartY + "px";
+      if (isDragging) {
+        textElement.style.left = e.clientX - startX + "px";
+        textElement.style.top = e.clientY - startY + "px";
       }
     });
 
     document.addEventListener("mouseup", () => {
-      isTextDragging = false;
+      isDragging = false;
     });
 
     textElement.addEventListener("input", () => {
@@ -265,79 +395,28 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  function downloadImage() {
-    if (!hasImage) return;
+  function adjustOffsets() {
+    if (!hasImage || !originalImage) return; // Add this check
 
-    // Create a new SVG element
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    const editorRect = editor.getBoundingClientRect();
-    svg.setAttribute("width", editorRect.width);
-    svg.setAttribute("height", editorRect.height);
+    const canvasRect = canvas.getBoundingClientRect();
+    const scaledWidth = originalImage.width * scale;
+    const scaledHeight = originalImage.height * scale;
 
-    // Add the background image
-    const image = document.createElementNS(
-      "http://www.w3.org/2000/svg",
-      "image"
-    );
-    image.setAttributeNS(
-      "http://www.w3.org/1999/xlink",
-      "href",
-      imageLayer.style.backgroundImage.slice(5, -2)
-    );
-    image.setAttribute("width", "100%");
-    image.setAttribute("height", "100%");
-    svg.appendChild(image);
+    // Adjust horizontal offset
+    if (scaledWidth <= canvasRect.width) {
+      offsetX = (canvasRect.width - scaledWidth) / 2;
+    } else {
+      offsetX = Math.min(0, Math.max(canvasRect.width - scaledWidth, offsetX));
+    }
 
-    // Add the drawings
-    const drawingSvg = drawLayer.cloneNode(true);
-    svg.appendChild(drawingSvg);
-
-    // Add the text overlays
-    const textOverlays = textLayer.querySelectorAll(".text-overlay");
-    textOverlays.forEach((overlay) => {
-      const foreignObject = document.createElementNS(
-        "http://www.w3.org/2000/svg",
-        "foreignObject"
+    // Adjust vertical offset
+    if (scaledHeight <= canvasRect.height) {
+      offsetY = (canvasRect.height - scaledHeight) / 2;
+    } else {
+      offsetY = Math.min(
+        0,
+        Math.max(canvasRect.height - scaledHeight, offsetY)
       );
-      foreignObject.setAttribute("x", overlay.style.left);
-      foreignObject.setAttribute("y", overlay.style.top);
-      foreignObject.setAttribute("width", overlay.offsetWidth);
-      foreignObject.setAttribute("height", overlay.offsetHeight);
-
-      const overlayClone = overlay.cloneNode(true);
-      overlayClone.style.left = "";
-      overlayClone.style.top = "";
-      overlayClone.style.transform = "";
-      foreignObject.appendChild(overlayClone);
-
-      svg.appendChild(foreignObject);
-    });
-
-    // Convert SVG to a data URL
-    const svgData = new XMLSerializer().serializeToString(svg);
-    const svgBlob = new Blob([svgData], {
-      type: "image/svg+xml;charset=utf-8",
-    });
-    const svgUrl = URL.createObjectURL(svgBlob);
-
-    // Create a temporary image to convert SVG to PNG
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement("canvas");
-      canvas.width = editorRect.width;
-      canvas.height = editorRect.height;
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(img, 0, 0);
-
-      // Create download link
-      const link = document.createElement("a");
-      link.download = "edited-image.png";
-      link.href = canvas.toDataURL("image/png");
-      link.click();
-
-      // Clean up
-      URL.revokeObjectURL(svgUrl);
-    };
-    img.src = svgUrl;
+    }
   }
 });

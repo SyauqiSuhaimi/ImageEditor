@@ -3,13 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Div-based Image Editor</title>
+    <title>Basic Image Editor</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <div class="container">
       <div class="header">
-        <h1>Div-based Image Editor</h1>
+        <h1>Basic Image Editor</h1>
       </div>
 
       <div class="toolbar">
@@ -21,7 +21,9 @@
         <div class="tool-section">
           <button id="draw-btn" class="btn">Draw</button>
           <button id="erase-btn" class="btn">Erase</button>
-          <button id="text-btn" class="btn">Add Text</button>
+          <button id="text-btn" class="btn" style="display: none">
+            Add Text
+          </button>
           <div class="color-picker-container">
             <label for="color-picker">Color:</label>
             <input type="color" id="color-picker" value="#ff0000" />
@@ -55,12 +57,9 @@
         </div>
       </div>
 
-      <div class="editor-container" id="editor-container">
-        <div class="editor" id="editor">
-          <div class="image-layer" id="image-layer"></div>
-          <svg class="draw-layer" id="draw-layer"></svg>
-          <div class="text-layer" id="text-layer"></div>
-        </div>
+      <div class="canvas-container" id="canvas-container">
+        <canvas id="canvas"></canvas>
+        <div id="text-overlay-container"></div>
         <div class="placeholder" id="placeholder">
           <p>Upload an image to start editing</p>
         </div>
